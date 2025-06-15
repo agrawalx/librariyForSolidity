@@ -1,90 +1,67 @@
-# Contract Rust Template
+# On-Chain Verifiable Computation Engine on Polkadot
+This project provides a hyper-optimized, comprehensive library of mathematical, geometric, and cryptographic functions, executed as a smart contract on the Polkadot Asset Hub. By leveraging the power of Rust and PolkaVM, it offers a verifiable, high-performance computation layer for other smart contracts and dApps, unlocking capabilities that are either impossible or prohibitively expensive in native Solidity.
 
-This is a minimal template for a Rust contract targeting [`pallet_revive`](https://contracts.polkadot.io). This is a low-
-level way to write contracts, so we don't expect it to be used for implementing high-level contract logic. Instead, we expect
-that Rust will be used to implement libraries that are then called by Solidity, similar to Python, where performance-critical
-code is written in C.
+## Overview
+The core of this project is a Rust smart contract that serves as an on-chain math co-processor. It contains a rich library of functions ranging from basic vector math and projectile physics to advanced number theory and elliptic curve cryptography.
 
-## Components
+To make these powerful functions accessible to the broader EVM ecosystem, a suite of lightweight Solidity wrapper contracts is deployed. These wrappers act as a bridge, allowing any EVM-compatible dApp or contract to call the Rust functions through a clean, familiar interface.
 
-In terms of code, this template is very bare bones. `main.rs` is just a few lines of code. Most of the files in this repo
-deal with compiling the code to PolkaVM in a `rust-analyzer`-friendly way. We included a `rust-toolchain.toml` and a
-`.cargo/config.toml` so that all tools automatically select the correct target and toolchain (we need a relatively new `nightly`).
+## Architecture
+The project follows a three-layer architecture:
 
-The `call_from_sol.sol` file demonstrates how to call the example in `main.rs` from Solidity.
+The Computation Layer (Rust Contract): A single, highly optimized Rust contract compiled to Wasm for PolkaVM. It contains the core logic for all mathematical operations and is deployed once to the Polkadot Asset Hub.
 
-## Memory Allocation
+The Interface Layer (Solidity Wrappers): A set of small, modular Solidity contracts (RustPhysics, RustGeometry, RustNumberTheory, etc.). Each wrapper handles the ABI encoding for a specific category of functions and uses a low-level staticcall to execute the logic in the main Rust contract.
 
-The contract depends on the `pallet-revive-uapi` crate, which is a thin (but safe) wrapper around all available host functions. It only
-includes the absolute minimum. This means we also don't include a memory allocator. If you want to use `alloc`, you need to define
-a global allocator. Note that we don't support dynamic memory allocations in `pallet_revive` yet. Therefore, the allocator would need
-to operate on a static buffer.
-
-## How to Build
-
-You can build this project with `cargo build`. However, to generate a valid contract, you also need to link it. Linking means taking the
-ELF file outputted by the Rust compiler and transforming it into a PolkaVM module.
-
-```sh
-# Make sure to have the latest polkatool installed
-$ cargo install polkatool
-
-# This will build the project and then use polkatool to link it
-$ make
+The Application Layer (Your dApp): Your decentralized application interacts with the familiar Solidity wrapper contracts using standard libraries like ethers.js or web3.js.
 ```
-
-**The build result is placed as `contract.polkavm` in the repository root. This is the final artifact that can be deployed as-is.**
-
-## How to Deploy and Call
-
-The easiest way, is to use [cast](https://getfoundry.sh) from the Foundry test-suite.
-
-```sh
-# Define the RPC URL (default to http://localhost:8545)
-export ETH_RPC_URL="https://westend-asset-hub-eth-rpc.polkadot.io"
-
-# Define the account that will use to call and deploy the contract
-# Make sure to fund the account with some tokens (e.g. using the faucet https://contracts.polkadot.io/connect-to-asset-hub)
-export ETH_FROM=0xf24FF3a9CF04c71Dbc94D0b566f7A27B94566cac
-cast wallet import dev-account --private-key 5fb92d6e98884f76de468fa3f6278f8807c48bebc13595d45af5bdc4da702133
-
-# Deploy the contract
-cast send --account evm-dev --create "$(xxd -p -c 99999 contract.polkavm)"
-
-# output
-# ...
-# contractAddress      0xc01Ee7f10EA4aF4673cFff62710E1D7792aBa8f3
-# ...
-
-# or to get the address
-
-RUST_ADDRESS=$(cast send --account dev-account --create "$(xxd -p -c 99999 contract.polkavm)" --json | jq -r .contractAddress)
-
-# Call the contract
-cast call $RUST_ADDRESS "fibonacci(uint32) public pure returns (uint32)" "4"
-
-# Build the solidity contract
-npx @parity/revive@latest --bin call_from_sol.sol
-
-# Deploy the solidity contract
-SOL_ADDRESS=$(cast send --account dev-account --create "$(xxd -p -c 99999 call_from_sol_sol_CallRust.polkavm)" --json | jq -r .contractAddress)
-
-# Compare the gas estimates
-cast estimate $RUST_ADDRESS "fibonacci(uint32) public pure returns (uint32)" 4
-cast estimate $SOL_ADDRESS "fibonacci(uint32) public pure returns (uint32)" 4
-
-# Call the rust contract from solidity
-cast call $SOL_ADDRESS "fibonacciRust(uint32, address) external pure returns (uint32)" 4 $RUST_ADDRESS
+graph TD
+    A[dApp Frontend <br> (ethers.js)] -->|Calls function| B(Solidity Wrapper <br> e.g., RustPhysics.sol);
+    B -->|staticcall with ABI-encoded data| C{Polkadot Asset Hub};
+    C -->|Executes logic in PolkaVM| D[Core Rust Contract <br> (Computation Engine)];
+    D -->|Returns result| C;
+    C -->|Returns data| B;
+    B -->|Decodes result| A;
 ```
+## Key Benefits
+1. Leveraging Polkadot Asset Hub & PolkaVM
+By deploying to the Polkadot Asset Hub, this computation engine becomes a shared, chain-level utility. Any other parachain or smart contract within the Polkadot ecosystem can call it, making it a powerful, interoperable resource. PolkaVM, a Wasm-based virtual machine, is designed for high-performance execution, running the compiled Rust code at near-native speeds. This is a fundamental departure from the EVM's design and is the key to the system's efficiency.
 
-## How to Inspect the Contract
+2. Drastic Gas Cost Reduction
+Running complex math in the EVM is notoriously expensive. Every loop iteration, every multiplication, every storage access costs a significant amount of gas.
 
-```sh
-polkatool stats contract.polkavm
-polkatool disassemble contract.polkavm
-```
+This project bypasses that limitation. A dApp makes a single, relatively cheap staticcall to the wrapper contract. All the heavy, iterative computation (like primality testing, trajectory simulation, or modular exponentiation) occurs within the highly efficient PolkaVM. The gas cost is primarily for the single call and data transfer, not for the millions of computational steps that might be happening inside the Rust VM. This can result in a 100x to 1000x+ reduction in gas fees for computationally intensive tasks compared to a pure-Solidity implementation.
 
-## Examples
+3. Beyond Solidity's Capabilities
+This architecture doesn't just make existing operations cheaper; it makes entirely new ones possible. Many of the functions in this library would be impossible to implement in native Solidity due to a combination of gas limits, stack depth limits, and missing native types.
 
-The [test fixtures](https://github.com/paritytech/polkadot-sdk/tree/master/substrate/frame/revive/fixtures/contracts) for `pallet_revive` are
-written in the same way as this template and might be useful as examples.
+## Capabilities Unlocked:
+
+Native i64 and i128 Math: Solidity lacks native support for signed 64-bit integers and the complex fixed-point arithmetic they enable, which is crucial for physics simulations like projectile_y_at_time.
+
+Complex Looping: The Miller-Rabin is_prime test involves multiple complex loops. Attempting this in Solidity for a u64 would instantly exceed the block gas limit. In Rust/PolkaVM, it's trivial.
+
+Advanced Cryptography: Functions like point_add and point_double for elliptic curves are foundational for many zero-knowledge proof systems and advanced signature schemes, but are too complex and costly for the EVM.
+
+No Stack Depth Limits: Recursive or deeply nested logic like the extended_gcd is safe in Rust, whereas it would quickly hit a "stack too deep" error in Solidity.
+
+Guaranteed Determinism: Because the logic is on-chain, every dApp and user is guaranteed that the same inputs will produce the exact same physics, randomness (from a shared seed), or geometric result, which is critical for fair, turn-based games.
+
+## Available Function Libraries
+The engine is split into logical libraries, each accessible through its own Solidity wrapper:
+
+- Core Math (RustMathCore): Basic arithmetic, trig functions, square roots, etc.
+
+- Vectors (RustVectors): Vector addition/subtraction, dot/cross products, magnitude, normalization.
+
+- Geometry (RustGeometry): Distance calculations, point-in-shape tests (circle, rect, triangle).
+
+- Physics (RustPhysics): Full projectile trajectory calculation.
+
+- Number Theory (RustNumberTheory): modexp, modinv, is_prime, gcd, lcm, phi, etc.
+
+- Bitwise (RustBitwise): popcount, log2, bit rotations, carry-less multiplication (clmul).
+
+- ECC (RustECC): Elliptic curve point addition and doubling.
+
+**This project represents a paradigm shift—moving from slow, expensive on-chain computation to fast, cheap, and verifiable on-chain execution, paving the way for a new generation of more powerful and complex decentralized applications.**
